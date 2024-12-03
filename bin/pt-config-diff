@@ -3066,7 +3066,25 @@ sub _parse_config {
       my $sql = "SHOW /*!40103 GLOBAL*/ VARIABLES";
       PTDEBUG && _d($dbh, $sql);
       my $rows = $dbh->selectall_arrayref($sql);
-      $config_data{vars} = { map { @$_ } @$rows };
+      $config_data{vars} = { map {
+                                my ($variable, $value) = @$_;
+                                # MySQL 5.7.6+ implement SHOW VARIABLES by
+                                # displaying records from performance_schema
+                                # table called global_variables. The table
+                                # truncates values at 1024 characters, but
+                                # some variables may be set to longer values.
+                                # The full value can still be accessed through
+                                # the @@global object.
+                                if (length($value) >= 1024) {
+                                   my $var_sql = "SELECT \@\@global.$variable";
+                                   PTDEBUG && _d($dbh, $var_sql);
+                                   my $var_sth = $dbh->prepare($var_sql);
+                                   $var_sth->execute();
+                                   ($value) = $var_sth->fetchrow_array();
+                                }
+                                $variable => $value
+                             } @$rows
+                           };
       $config_data{mysql_version} = _get_version($dbh);
    }
    else {
